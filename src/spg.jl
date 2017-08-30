@@ -33,6 +33,7 @@ export spg, spg!, SPGInfo
 const SEARCHING            =  0
 const INFNORM_CONVERGENCE  =  1
 const TWONORM_CONVERGENCE  =  2
+const FUNCTION_STAGNATION  =  3
 const TOO_MANY_ITERATIONS  = -1
 const TOO_MANY_EVALUATIONS = -2
 
@@ -82,6 +83,10 @@ The following keywords are available:
 
 * `eps2` specifies the stopping criterion `‖pg‖_2 ≤ eps2` with `pg` the
   projected gradient.  By default, `eps2 = 1e-6`.
+
+* `eps3` specifies the relative function value change that must occur at each
+  iteration, i.e., |f_{k+1}-f_k|>eps3*max(|f_{k+1}|,|f_k|).
+  By default, `eps3=1e-3`
 
 * `eta` specifies a scaling parameter for the gradient.  The projected gradient
   is computed as `(x - prj(x - eta*g))/eta` (with `g` the gradient at `x`)
@@ -145,7 +150,8 @@ REASON = Dict{Int,String}(SEARCHING => "Work in progress",
                           INFNORM_CONVERGENCE => "Convergence with projected gradient infinite-norm",
                           TWONORM_CONVERGENCE => "Convergence with projected gradient 2-norm",
                           TOO_MANY_ITERATIONS => "Too many iterations",
-                          TOO_MANY_EVALUATIONS => "Too many function evaluations")
+                          TOO_MANY_EVALUATIONS => "Too many function evaluations",
+                          FUNCTION_STAGNATION => "Function stagnation")
 
 getreason(ws::SPGInfo) = get(REASON, ws.status, "unknown status")
 
@@ -155,18 +161,19 @@ function spg!{T}(fg!, prj!, x::T, m::Integer;
                   maxfc::Integer=typemax(Int),
                   eps1::Real=1e-6,
                   eps2::Real=1e-6,
+                  eps3::Real=1e-3,
                   eta::Real=1.0,
                   printer::Function=default_printer,
                   verb::Bool=false,
                   io::IO=STDOUT)
     _spg!(fg!, prj!, x, Int(m), ws, Int(maxit), Int(maxfc),
-          Float(eps1), Float(eps2), Float(eta),
+          Float(eps1), Float(eps2), Float(eps3), Float(eta),
           printer, verb, io)
 end
 
 function _spg!{T}(fg!, prj!, x::T, m::Int, ws::SPGInfo,
                   maxit::Int, maxfc::Int,
-                  eps1::Float, eps2::Float, eta::Float,
+                  eps1::Float, eps2::Float, eps3::Float, eta::Float,
                   printer::Function, verb::Bool, io::IO)
     # Initialization.
     @assert m ≥ 1
@@ -183,7 +190,7 @@ function _spg!{T}(fg!, prj!, x::T, m::Int, ws::SPGInfo,
     local pcnt::Int = 0
     local status::Int = SEARCHING
     if m > 1
-        lastfv = Array(Float, m)
+        lastfv = Array{Float}(m)
         fill!(lastfv, -Inf)
     end
     local x0::T = vcopy(x)
@@ -344,6 +351,10 @@ function _spg!{T}(fg!, prj!, x::T, m::Int, ws::SPGInfo,
         if status != SEARCHING
             # The number of function evaluations was exceeded inside the line
             # search.
+            break
+        end
+        if abs(f-f0) < eps3*max(abs(f),abs(f0))
+            status = FUNCTION_STAGNATION
             break
         end
 
